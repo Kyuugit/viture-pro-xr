@@ -13,7 +13,7 @@ jobs:
       - name: Install pinned disassembler in disposable runner
         run: |
           python3 -m pip install --disable-pip-version-check --only-binary=:all: capstone==5.0.6
-      - name: Follow display functions without executing firmware
+      - name: Trace precise preset operations without executing firmware
         shell: bash
         run: |
           python3 - <<'PY'
@@ -31,12 +31,12 @@ jobs:
                       p=((i.address+4)&~3)+o.mem.disp-bias
                       if 0<=p<len(data)-3: out+=' ; literal '+hex(struct.unpack_from('<I',data,p)[0])
               return out
-          functions=[('preset_consumer_A',0x80220e8),('preset_consumer_B',0x8021f10),('brightness_apply_candidate',0x801f8f4),('left_panel_byte_writer',0x801736c),('right_panel_byte_writer',0x8017494),('preset_related_parameter',0x8022128)]
+          functions=[('preset_panel_apply',0x8021e74),('brightness_lookup',0x8021a54),('brightness_apply',0x80220b0),('bridge_write_helper',0x8011e64),('left_panel_serial_byte',0x80172d6)]
           for name,start in functions:
               todo=[start];seen={};calls=set();escapes=[]
-              while todo and len(seen)<160:
+              while todo and len(seen)<180:
                   va=todo.pop()
-                  while va not in seen and len(seen)<160:
+                  while va not in seen and len(seen)<180:
                       off=va-bias
                       if not (start<=va<start+0x900 and 24<=off<0x15e00):
                           escapes.append(hex(va));break
@@ -48,13 +48,12 @@ jobs:
                               if o.type==ARM_OP_IMM:calls.add(o.imm)
                       if i.mnemonic.startswith('pop') and 'pc' in i.op_str or i.mnemonic=='bx':break
                       if i.group(CS_GRP_JUMP) and i.mnemonic not in ('bl','blx'):
-                          targets=[o.imm for o in i.operands if o.type==ARM_OP_IMM]
-                          todo+=targets
+                          todo += [o.imm for o in i.operands if o.type==ARM_OP_IMM]
                           if i.mnemonic in ('b','b.w'):break
                       va+=i.size
-              print('FUNCTION_BEGIN',name,hex(start),'file',hex(start-bias),'instruction_count',len(seen),'budget_hit',len(seen)>=160)
+              print('FUNCTION_BEGIN',name,hex(start),'file',hex(start-bias),'instruction_count',len(seen),'budget_hit',len(seen)>=180)
               for va in sorted(seen):print(annotate(seen[va]))
               print('CALLEES',json.dumps([hex(x) for x in sorted(calls)]),'ESCAPES',json.dumps(sorted(set(escapes))))
               print('FUNCTION_END')
-          print('Static CFG candidates only; indirect calls, tables and IT predicates need review. No firmware executed or device accessed.')
+          print('Static decoding only. Unknown register semantics are not HDR claims. No device access or firmware execution.')
           PY
