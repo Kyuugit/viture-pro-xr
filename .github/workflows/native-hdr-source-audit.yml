@@ -1,0 +1,63 @@
+name: Native HDR source artifact audit
+on:
+  push:
+    paths:
+      - '.github/workflows/native-hdr-source-audit.yml'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  inspect-public-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect exact stock artifact in memory, report metadata only
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import datetime, hashlib, json, re, struct, urllib.request
+          URL = 'https://static.viture.com/dfu-util/bin/n6p_latest.bin'
+          EXPECTED = '5f3965f20e2e468efb70c6e268f2b7b2743bce47e6ecfa999faadf2637c96228'
+          report = {'scope': 'static_public_artifact_only', 'utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'url': URL, 'device_operations': 0, 'firmware_executed': False, 'vendor_bytes_published': False}
+          def crc_msb(data):
+              crc = 0
+              for b in data:
+                  crc ^= b << 24
+                  for _ in range(8):
+                      crc = ((crc << 1) ^ (0xF4ACFB13 if crc & 0x80000000 else 0)) & 0xffffffff
+              return crc
+          try:
+              req = urllib.request.Request(URL, headers={'User-Agent': 'Viture-Pro-XR-source-research/1.0'})
+              with urllib.request.urlopen(req, timeout=35) as response:
+                  data = response.read(2000001)
+                  report['http_status'] = response.status
+                  report['final_url'] = response.url
+              if len(data) > 2000000:
+                  raise ValueError('Artifact exceeds read limit')
+              digest = hashlib.sha256(data).hexdigest()
+              report.update(bytes=len(data), sha256=digest, matches_historical_sha256=(digest == EXPECTED))
+              if digest == EXPECTED:
+                  length = struct.unpack_from('<I', data, 4)[0]
+                  computed = crc_msb(data[8:8+length])
+                  stored_be = struct.unpack_from('>I', data)[0]
+                  stored_le = struct.unpack_from('<I', data)[0]
+                  sp, reset = struct.unpack_from('<II', data, 24)
+                  report['container'] = {'length_at_4_le': length, 'size_minus_8_matches': length == len(data)-8, 'identity_at_8': data[8:24].split(b'\0')[0].decode('ascii', 'replace'), 'stored_checksum_be': hex(stored_be), 'stored_checksum_le': hex(stored_le), 'computed_xreal_air_crc': hex(computed), 'checksum_match_be': stored_be == computed, 'checksum_match_le': stored_le == computed, 'candidate_payload_offset': 24, 'initial_sp': hex(sp), 'reset_vector': hex(reset)}
+                  relevant = re.compile(rb'(?:LT7911|N6P|OLED|panel|gamma|color|colour|contrast|lumin|hdr|edid|lvds|preset)', re.I)
+                  report['diagnostic_labels'] = [{'offset': hex(m.start()), 'text': m.group().decode('ascii')} for m in re.finditer(rb'[ -~]{5,}', data) if relevant.search(m.group()) and len(m.group()) <= 120][:80]
+                  result = []
+                  for off in range(len(data)-127):
+                      if data[off:off+8] == b'\x00\xff\xff\xff\xff\xff\xff\x00':
+                          block = data[off:off+128]
+                          result.append({'offset': hex(off), 'base_checksum_valid': sum(block)%256 == 0, 'declared_extensions': block[126], 'version': [block[18], block[19]]})
+                  report['edid_candidates'] = result
+                  vectors = struct.unpack_from('<64I', data, 24)
+                  report['vector_base_candidates'] = [{'base': hex(base), 'thumb_vectors_in_range': sum(1 for v in vectors[1:] if v & 1 and base <= v-1 < base+len(data)-24), 'reset_file_offset': hex((reset & ~1)-base+24)} for base in (0, 0x08000000, 0x08008000, 0x0800c000, 0x08010000)]
+                  report['interpretation'] = 'Container and structure only; no boot, authenticity, control-map or HDR result.'
+              else:
+                  report['interpretation'] = 'Unknown artifact: parsing deliberately stopped.'
+          except Exception as exc:
+              report['acquisition_error'] = str(exc)
+          print('SOURCE_AUDIT_REPORT_BEGIN')
+          print(json.dumps(report, indent=2, sort_keys=True))
+          print('SOURCE_AUDIT_REPORT_END')
+          PY
