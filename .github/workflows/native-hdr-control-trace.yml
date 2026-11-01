@@ -1,0 +1,80 @@
+name: Native HDR static display control trace
+on:
+  push:
+    paths:
+      - '.github/workflows/native-hdr-control-trace.yml'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  static-control-trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Install pinned disassembler in disposable runner
+        run: python3 -m pip install --disable-pip-version-check --only-binary=:all: capstone==5.0.6
+      - name: Decode stock code without executing firmware
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, re, struct, urllib.request
+          from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB, CS_MODE_MCLASS
+          from capstone.arm import ARM_OP_MEM, ARM_REG_PC
+          URL='https://static.viture.com/dfu-util/bin/n6p_latest.bin'
+          with urllib.request.urlopen(URL, timeout=35) as r:
+              data=r.read(2000001)
+          sha=hashlib.sha256(data).hexdigest()
+          if sha!='5f3965f20e2e468efb70c6e268f2b7b2743bce47e6ecfa999faadf2637c96228':
+              raise SystemExit('Unknown input hash; trace stopped')
+          labels={}
+          for label in (b'panel_init', b'color_scheme_state:%d', b'L_OLED Write Reg', b'R_OLED Write Reg', b' LT7911 write error'):
+              off=data.find(label)
+              if off>=0: labels[label.decode()]=off
+          md=Cs(CS_ARCH_ARM, CS_MODE_THUMB|CS_MODE_MCLASS)
+          md.detail=True
+          def decode(off, count, bias):
+              if off<24 or off>=len(data): return []
+              return [{'file':hex(i.address-bias),'va':hex(i.address),'asm':i.mnemonic+' '+i.op_str} for i in md.disasm(data[off:off+count*4],off+bias,count)]
+          candidates=[]
+          for base in (0x08000000,0x08008000,0x0800c000,0x0800f000):
+              bias=base-24
+              refs={}
+              for label,off in labels.items():
+                  word=struct.pack('<I',off+bias)
+                  refs[label]=[hex(m.start()) for m in re.finditer(re.escape(word),data)]
+              reset=struct.unpack_from('<I',data,28)[0]&~1
+              candidates.append({'base':hex(base),'bias':hex(bias),'literal_refs':refs,'reset_decode':decode(reset-bias,8,bias)})
+          print('BASE_AND_LITERAL_CANDIDATES_BEGIN')
+          print(json.dumps({'sha256':sha,'labels':{k:hex(v) for k,v in labels.items()},'candidates':candidates},indent=2))
+          print('BASE_AND_LITERAL_CANDIDATES_END')
+          ranked=sorted(candidates,key=lambda x:sum(len(v) for v in x['literal_refs'].values()),reverse=True)
+          if not sum(len(v) for v in ranked[0]['literal_refs'].values()):
+              raise SystemExit('No string-literal base anchor; no further interpretation')
+          bias=int(ranked[0]['bias'],16)
+          pools={int(off,16):label for label,offs in ranked[0]['literal_refs'].items() for off in offs}
+          loads=[]
+          # Search aligned Thumb instruction candidates; each hit remains subject to function-boundary review.
+          for off in range(24,min(len(data)-4,0x16000),2):
+              ins=next(md.disasm(data[off:off+4],off+bias,1),None)
+              if ins is None or not ins.mnemonic.startswith('ldr'): continue
+              for operand in ins.operands:
+                  if operand.type==ARM_OP_MEM and operand.mem.base==ARM_REG_PC:
+                      literal=((ins.address+4)&~3)+operand.mem.disp-bias
+                      if literal in pools:
+                          loads.append({'label':pools[literal],'load_file':hex(off),'literal_file':hex(literal),'context':decode(max(24,off-24),22,bias)})
+          print('DISPLAY_LABEL_XREFS_BEGIN')
+          print(json.dumps({'chosen_bias_by_literal_hits':hex(bias),'qualification':'Static instruction candidates; not executed, not complete function recovery','loads':loads},indent=2))
+          print('DISPLAY_LABEL_XREFS_END')
+          # Summarize candidate function starts near label users without exposing unrelated payloads.
+          for hit in loads:
+              off=int(hit['load_file'],16)
+              starts=[]
+              for s in range(max(24,off-320),off+2,2):
+                  hw=struct.unpack_from('<H',data,s)[0]
+                  if hw&0xfe00==0xb400 or data[s:s+2]==b'\x2d\xe9': starts.append(s)
+              if starts:
+                  s=starts[-1]
+                  print('CANDIDATE_FUNCTION',hit['label'],hex(s))
+                  for row in decode(s,85,bias):
+                      print(row['file'],row['va'],row['asm'])
+          print('No firmware execution, modification, device access, keys or raw binary output.')
+          PY
