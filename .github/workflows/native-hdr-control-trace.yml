@@ -13,47 +13,43 @@ jobs:
       - name: Install pinned disassembler in disposable runner
         run: |
           python3 -m pip install --disable-pip-version-check --only-binary=:all: capstone==5.0.6
-      - name: Trace precise preset operations without executing firmware
+      - name: Locate display table provenance without firmware execution
         shell: bash
         run: |
           python3 - <<'PY'
           import hashlib,json,struct,urllib.request
-          from capstone import Cs,CS_ARCH_ARM,CS_MODE_THUMB,CS_MODE_MCLASS,CS_GRP_JUMP
-          from capstone.arm import ARM_OP_MEM,ARM_OP_IMM,ARM_REG_PC
+          from capstone import Cs,CS_ARCH_ARM,CS_MODE_THUMB,CS_MODE_MCLASS
+          from capstone.arm import ARM_OP_MEM,ARM_REG_PC
           with urllib.request.urlopen('https://static.viture.com/dfu-util/bin/n6p_latest.bin',timeout=35) as r: data=r.read(2000001)
           assert hashlib.sha256(data).hexdigest()=='5f3965f20e2e468efb70c6e268f2b7b2743bce47e6ecfa999faadf2637c96228'
           bias=0x0800efe8
           md=Cs(CS_ARCH_ARM,CS_MODE_THUMB|CS_MODE_MCLASS);md.detail=True
-          def annotate(i):
-              out=hex(i.address-bias)+' '+hex(i.address)+' '+i.mnemonic+' '+i.op_str
-              for o in i.operands:
-                  if o.type==ARM_OP_MEM and o.mem.base==ARM_REG_PC:
-                      p=((i.address+4)&~3)+o.mem.disp-bias
-                      if 0<=p<len(data)-3: out+=' ; literal '+hex(struct.unpack_from('<I',data,p)[0])
-              return out
-          functions=[('preset_panel_apply',0x8021e74),('brightness_lookup',0x8021a54),('brightness_apply',0x80220b0),('bridge_write_helper',0x8011e64),('left_panel_serial_byte',0x80172d6)]
-          for name,start in functions:
-              todo=[start];seen={};calls=set();escapes=[]
-              while todo and len(seen)<180:
-                  va=todo.pop()
-                  while va not in seen and len(seen)<180:
-                      off=va-bias
-                      if not (start<=va<start+0x900 and 24<=off<0x15e00):
-                          escapes.append(hex(va));break
-                      i=next(md.disasm(data[off:off+4],va,1),None)
-                      if i is None:break
-                      seen[va]=i
-                      if i.mnemonic in ('bl','blx'):
-                          for o in i.operands:
-                              if o.type==ARM_OP_IMM:calls.add(o.imm)
-                      if i.mnemonic.startswith('pop') and 'pc' in i.op_str or i.mnemonic=='bx':break
-                      if i.group(CS_GRP_JUMP) and i.mnemonic not in ('bl','blx'):
-                          todo += [o.imm for o in i.operands if o.type==ARM_OP_IMM]
-                          if i.mnemonic in ('b','b.w'):break
-                      va+=i.size
-              print('FUNCTION_BEGIN',name,hex(start),'file',hex(start-bias),'instruction_count',len(seen),'budget_hit',len(seen)>=180)
-              for va in sorted(seen):print(annotate(seen[va]))
-              print('CALLEES',json.dumps([hex(x) for x in sorted(calls)]),'ESCAPES',json.dumps(sorted(set(escapes))))
-              print('FUNCTION_END')
-          print('Static decoding only. Unknown register semantics are not HDR claims. No device access or firmware execution.')
+          for name,va,count in [('c_runtime_entry',0x0800f194,12),('system_init',0x08017b80,26),('panel_luminance_set',0x08015aa6,35)]:
+              print('REGION',name,hex(va))
+              off=va-bias
+              for i in md.disasm(data[off:off+count*4],va,count):
+                  s=hex(i.address-bias)+' '+hex(i.address)+' '+i.mnemonic+' '+i.op_str
+                  for o in i.operands:
+                      if o.type==ARM_OP_MEM and o.mem.base==ARM_REG_PC:
+                          p=((i.address+4)&~3)+o.mem.disp-bias
+                          if 0<=p<len(data)-3:s+=' ; literal@'+hex(p)+'='+hex(struct.unpack_from('<I',data,p)[0])
+                  print(s)
+          # Find aligned runs of pointer-valued words; they are structural candidates, not decoded tables.
+          runs=[];start=None;values=[]
+          for off in range(24,len(data)-3,4):
+              v=struct.unpack_from('<I',data,off)[0]
+              pointer=(0x0800f000<=v<bias+len(data)) or (0x20000000<=v<0x20004000)
+              if pointer:
+                  if start is None:start=off
+                  values.append(v)
+              else:
+                  if start is not None and len(values)>=8:runs.append((start,values))
+                  start=None;values=[]
+          for start,vals in sorted(runs,key=lambda x:len(x[1]),reverse=True)[:8]:
+              print('POINTER_RUN',hex(start),'count',len(vals),'first_words',json.dumps([hex(v) for v in vals[:36]]))
+          # Locate literal references to the profile table or RAM base; report offsets only.
+          for val in (0x20000000,0x20000040,0x20000090,0x200000d0):
+              needle=struct.pack('<I',val)
+              print('RAM_LITERAL',hex(val),[hex(o) for o in range(24,len(data)-3,2) if data[o:o+4]==needle][:80])
+          print('No arbitrary data dump, firmware execution, mutation or hardware access.')
           PY
