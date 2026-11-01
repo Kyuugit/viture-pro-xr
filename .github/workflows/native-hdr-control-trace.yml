@@ -8,26 +8,26 @@ permissions: {}
 jobs:
   static-control-trace:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 3
     steps:
-      - name: Install pinned disassembler in disposable runner
-        run: |
-          python3 -m pip install --disable-pip-version-check --only-binary=:all: capstone==5.0.6
-      - name: Decode data-loader logic, not execute it
+      - name: Decode initialized profile data with reviewed Python parser
         shell: bash
         run: |
           python3 - <<'PY'
-          import hashlib,struct,urllib.request
-          from capstone import Cs,CS_ARCH_ARM,CS_MODE_THUMB,CS_MODE_MCLASS
+          import hashlib,json,urllib.request
+          parser_url='https://raw.githubusercontent.com/Kyuugit/viture-pro-xr/26cc2d55f2ddde41200f1b1a094393ab3f2a9f8d/tools/inspect_pro_profiles.py'
+          with urllib.request.urlopen(parser_url,timeout=30) as r:source=r.read(50000)
+          expected='2f361b19962da9a720a50803236edb1d17901cd552d93db4d89ddc461132c3c7'
+          if hashlib.sha256(source).hexdigest()!=expected:raise SystemExit('Parser source hash mismatch')
+          namespace={'__name__':'source_inspector'}
+          exec(compile(source,parser_url,'exec'),namespace)
+          checks=namespace['self_test']()
           with urllib.request.urlopen('https://static.viture.com/dfu-util/bin/n6p_latest.bin',timeout=35) as r:data=r.read(2000001)
-          assert hashlib.sha256(data).hexdigest()=='5f3965f20e2e468efb70c6e268f2b7b2743bce47e6ecfa999faadf2637c96228'
-          bias=0x0800efe8
-          md=Cs(CS_ARCH_ARM,CS_MODE_THUMB|CS_MODE_MCLASS)
-          for off in (0x24bd4,0x24be4):print('SCATTER_RECORD',hex(off),*[hex(x) for x in struct.unpack_from('<4I',data,off)])
-          print('DECOMPRESSOR_DECODE_BEGIN')
-          va=0x08010780;off=va-bias
-          for i in md.disasm(data[off:off+320],va,95):
-              print(hex(i.address-bias),hex(i.address),i.mnemonic,i.op_str)
-          print('DECOMPRESSOR_DECODE_END')
-          print('No firmware execution, extraction publication, mutation or device access.')
+          report=namespace['inspect'](data)
+          report['parser_sha256']=expected
+          report['decoder_fixtures_passed']=checks
+          print('PROFILE_REPORT_BEGIN')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          print('PROFILE_REPORT_END')
+          print('Only our data parser executed. No vendor firmware execution, device access, patch or binary publication.')
           PY
