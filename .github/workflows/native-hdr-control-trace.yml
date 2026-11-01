@@ -11,7 +11,8 @@ jobs:
     timeout-minutes: 4
     steps:
       - name: Install pinned disassembler in disposable runner
-        run: python3 -m pip install --disable-pip-version-check --only-binary=:all: capstone==5.0.6
+        run: |
+          python3 -m pip install --disable-pip-version-check --only-binary=:all: capstone==5.0.6
       - name: Decode stock code without executing firmware
         shell: bash
         run: |
@@ -52,7 +53,6 @@ jobs:
           bias=int(ranked[0]['bias'],16)
           pools={int(off,16):label for label,offs in ranked[0]['literal_refs'].items() for off in offs}
           loads=[]
-          # Search aligned Thumb instruction candidates; each hit remains subject to function-boundary review.
           for off in range(24,min(len(data)-4,0x16000),2):
               ins=next(md.disasm(data[off:off+4],off+bias,1),None)
               if ins is None or not ins.mnemonic.startswith('ldr'): continue
@@ -64,7 +64,6 @@ jobs:
           print('DISPLAY_LABEL_XREFS_BEGIN')
           print(json.dumps({'chosen_bias_by_literal_hits':hex(bias),'qualification':'Static instruction candidates; not executed, not complete function recovery','loads':loads},indent=2))
           print('DISPLAY_LABEL_XREFS_END')
-          # Summarize candidate function starts near label users without exposing unrelated payloads.
           for hit in loads:
               off=int(hit['load_file'],16)
               starts=[]
