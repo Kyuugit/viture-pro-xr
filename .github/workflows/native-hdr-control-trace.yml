@@ -13,46 +13,48 @@ jobs:
       - name: Install pinned disassembler in disposable runner
         run: |
           python3 -m pip install --disable-pip-version-check --only-binary=:all: capstone==5.0.6
-      - name: Decode bounded display code without executing firmware
+      - name: Follow display functions without executing firmware
         shell: bash
         run: |
           python3 - <<'PY'
-          import hashlib, json, struct, urllib.request
-          from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB, CS_MODE_MCLASS
-          from capstone.arm import ARM_OP_MEM, ARM_OP_IMM, ARM_OP_REG, ARM_REG_PC
-          with urllib.request.urlopen('https://static.viture.com/dfu-util/bin/n6p_latest.bin', timeout=35) as r:
-              data=r.read(2000001)
-          sha=hashlib.sha256(data).hexdigest()
-          assert sha=='5f3965f20e2e468efb70c6e268f2b7b2743bce47e6ecfa999faadf2637c96228'
+          import hashlib,json,struct,urllib.request
+          from capstone import Cs,CS_ARCH_ARM,CS_MODE_THUMB,CS_MODE_MCLASS,CS_GRP_JUMP
+          from capstone.arm import ARM_OP_MEM,ARM_OP_IMM,ARM_REG_PC
+          with urllib.request.urlopen('https://static.viture.com/dfu-util/bin/n6p_latest.bin',timeout=35) as r: data=r.read(2000001)
+          assert hashlib.sha256(data).hexdigest()=='5f3965f20e2e468efb70c6e268f2b7b2743bce47e6ecfa999faadf2637c96228'
           bias=0x0800efe8
-          print('TRACE_INPUT',sha,'BIAS',hex(bias),'inferred from vector/reset layout; inspect relative references as cross-check')
-          md=Cs(CS_ARCH_ARM,CS_MODE_THUMB|CS_MODE_MCLASS)
-          md.detail=True
-          def annotated(ins):
-              text=hex(ins.address-bias)+' '+hex(ins.address)+' '+ins.mnemonic+' '+ins.op_str
-              for o in ins.operands:
+          md=Cs(CS_ARCH_ARM,CS_MODE_THUMB|CS_MODE_MCLASS);md.detail=True
+          def annotate(i):
+              out=hex(i.address-bias)+' '+hex(i.address)+' '+i.mnemonic+' '+i.op_str
+              for o in i.operands:
                   if o.type==ARM_OP_MEM and o.mem.base==ARM_REG_PC:
-                      p=((ins.address+4)&~3)+o.mem.disp-bias
-                      if 0<=p<len(data)-3:
-                          text+=' ; literal@'+hex(p)+'='+hex(struct.unpack_from('<I',data,p)[0])
-              return text
-          for name,lo,hi in [('reset',0x1c4,0x1ec),('panel_writers',0x6b20,0x6bfd),('panel_init',0x6c70,0x6f5c),('color_state',0x13500,0x1382c)]:
-              print('REGION_BEGIN',name,hex(lo),hex(hi))
-              for ins in md.disasm(data[lo:hi],lo+bias): print(annotated(ins))
-              print('REGION_END')
-          labels={k:data.find(k.encode()) for k in ('panel_init','color_scheme_state:%d','L_OLED Write Reg','R_OLED Write Reg')}
-          refs=[]
-          for off in range(24,0x15e00,2):
-              ins=next(md.disasm(data[off:off+4],off+bias,1),None)
-              if ins is None: continue
-              target=None
-              if ins.mnemonic=='adr' and len(ins.operands)>1 and ins.operands[1].type==ARM_OP_IMM:
-                  target=((ins.address+4)&~3)+ins.operands[1].imm-bias
-              elif ins.mnemonic in ('addw','add','subw') and len(ins.operands)>2 and ins.operands[1].type==ARM_OP_REG and ins.operands[1].reg==ARM_REG_PC and ins.operands[2].type==ARM_OP_IMM:
-                  target=((ins.address+4)&~3)+(ins.operands[2].imm if ins.mnemonic!='subw' else -ins.operands[2].imm)-bias
-              if target is not None:
-                  for name,t in labels.items():
-                      if t-4<=target<=t+2: refs.append({'label':name,'reference_file':hex(off),'target_file':hex(target),'instruction':ins.mnemonic+' '+ins.op_str})
-          print('RELATIVE_LABEL_REFERENCES',json.dumps(refs))
-          print('Static decoding only. No firmware run, patch, flash or hardware measurement.')
+                      p=((i.address+4)&~3)+o.mem.disp-bias
+                      if 0<=p<len(data)-3: out+=' ; literal '+hex(struct.unpack_from('<I',data,p)[0])
+              return out
+          functions=[('color_state_getter',0x801f620),('color_transition_A',0x801fa80),('color_transition_B',0x801f608),('other_transition_C',0x801f7a0),('other_transition_D',0x801f8d0),('state_transition_E',0x801f7dc),('state_transition_F',0x801f76c),('panel_init_call_1',0x8021e04),('panel_init_call_2',0x8021cdc),('panel_init_call_3',0x8021dcc)]
+          for name,start in functions:
+              todo=[start];seen={};calls=set();escapes=[]
+              while todo and len(seen)<150:
+                  va=todo.pop()
+                  while va not in seen and len(seen)<150:
+                      off=va-bias
+                      if not (start<=va<start+0x700 and 24<=off<0x15e00):
+                          escapes.append(hex(va));break
+                      i=next(md.disasm(data[off:off+4],va,1),None)
+                      if i is None:break
+                      seen[va]=i
+                      if i.mnemonic in ('bl','blx'):
+                          for o in i.operands:
+                              if o.type==ARM_OP_IMM:calls.add(o.imm)
+                      if i.mnemonic.startswith('pop') and 'pc' in i.op_str or i.mnemonic=='bx':break
+                      if i.group(CS_GRP_JUMP) and i.mnemonic not in ('bl','blx'):
+                          targets=[o.imm for o in i.operands if o.type==ARM_OP_IMM]
+                          todo+=targets
+                          if i.mnemonic in ('b','b.w'):break
+                      va+=i.size
+              print('FUNCTION_BEGIN',name,hex(start),'file',hex(start-bias),'instruction_count',len(seen),'budget_hit',len(seen)>=150)
+              for va in sorted(seen):print(annotate(seen[va]))
+              print('CALLEES',json.dumps([hex(x) for x in sorted(calls)]),'ESCAPES',json.dumps(sorted(set(escapes))))
+              print('FUNCTION_END')
+          print('Static CFG candidates only; indirect calls, tables and IT predicates need review. No firmware executed or device accessed.')
           PY
