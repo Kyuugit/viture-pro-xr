@@ -1,39 +1,41 @@
-# Original VITURE Pro XR — device-side extension
+# Original VITURE Pro XR — native-HDR device extension
 
-This repository owns decisions, future implementation and experiments for the **original VITURE Pro XR**. Supporting research stays in [the existing bin archive](https://github.com/Kyuugit/bin/tree/main/viture-pro-xr-hdr-refresh-20261029). Original Pro is not Pro 2, Luma or Beast; related devices provide mechanisms to investigate, not firmware to cross-flash.
+This repository owns decisions, future implementation and experiments for the **original VITURE Pro XR**. Supporting research stays in [the existing bin archive](https://github.com/Kyuugit/bin/tree/main/viture-pro-xr-hdr-refresh-20261029). GlassVR remains the integration target. Pro 2, Luma, XREAL and RayNeo are mechanism references, not cross-flash targets.
 
-## Current native-HDR investigation — 1 November 2026
+## Current conclusion — 1 November 2026
 
-**Start with [Native-HDR investigation: concrete pathways and next work](NATIVE-HDR-INVESTIGATION-20261101.md).** The strongest new lead is VITURE's explicit description of Pro 2 panel-register gamma tuning, combined with original-Pro stock colour presets. Trace the original Pro's preset/panel initialization to actual hardware controls before proposing an HDR patch. Luma Pro supplies a further control-family comparison; the XREAL kit supplies implemented MCU diagnostic and coordinated bridge/panel patterns.
+**Start with [HDR hardware feasibility and implementation gates](HDR-HARDWARE-FEASIBILITY-20261101.md).** A usable HDR system needs both an adequate panel and correct signal-to-light processing/drive. The closest successful glasses comparison, RayNeo Air 4 Pro, contains two teardown-identified PX8618 processors as well as LT7911UXC. Newly inspected Iris6-family source exposes separate HDR-input and SDR-enhancement modes, LUT selection, content-light control, colour/gamma resources and calibration dependencies.
 
-The [pathway evidence](https://github.com/Kyuugit/bin/blob/478f406996d07701e07b2c6456997243c9d33eb4/viture-pro-xr-hdr-refresh-20261029/NATIVE-HDR-PATHWAYS-20261101.md) also follows a neighbouring Sony panel's native gamma/precision diagram and an LT7911UXC-family HDR-related status implementation. **These establish concrete investigative pathways, not a verified native PQ mode on original Pro.** The [source review](https://github.com/Kyuugit/bin/blob/478f406996d07701e07b2c6456997243c9d33eb4/viture-pro-xr-hdr-refresh-20261029/NATIVE-HDR-PATHWAYS-REVIEW-20261101.md) records diagnostic-validation gaps that must not be copied into a Pro port.
+That explains a real hardware pathway; it is not a Pro firmware port. The known Pro inventory does not identify that added processor. Firmware-only native HDR depends on finding equivalent essential capabilities in the installed bridge or panel electronics. A separate processor is not universally required, but neither OLED technology, HDR reception nor gamma presets alone proves the necessary path exists.
+
+The [hardware research](https://github.com/Kyuugit/bin/blob/6884d0154f4515dfcfe38e4902b12c8cfcca7c23/viture-pro-xr-hdr-refresh-20261029/HDR-ENABLING-HARDWARE-20261101.md) and [same-author review](https://github.com/Kyuugit/bin/blob/6884d0154f4515dfcfe38e4902b12c8cfcca7c23/viture-pro-xr-hdr-refresh-20261029/HDR-ENABLING-HARDWARE-REVIEW-20261101.md) retain source pins, confidence, exact-model limits and failed access checks. Native HDR and native ten-bit panel DACs remain separate claims; correctly applied dithering is not SDR enhancement.
 
 ## Authoritative requirement
 
-[Native-HDR requirement](NATIVE-HDR-REQUIREMENT-20261101.md): genuine HDR input displayed by the glasses' native hardware, enabled/configured through the STM32 and, where required, bridge/panel firmware. SDR-to-HDR enhancement, host HDR-to-SDR output and a new MCU software pixel mapper do not satisfy the goal. The STM32 is the control entry point; the video stream need not be processed by its CPU.
+[Native-HDR requirement](NATIVE-HDR-REQUIREMENT-20261101.md): genuine HDR input displayed by the glasses' existing hardware, enabled through STM32 and, where required, bridge/panel configuration or firmware. SDR enhancement, host HDR-to-SDR output and a new MCU software pixel mapper do not satisfy the objective. STM32 is the control entry point; it need not process every video pixel.
 
-The historical MCU cycles-per-pixel calculation does not argue against enabling a native hardware mode. Host patterns may serve as diagnostic references; they do not replace the objective. Keep **GlassVR** as the integration target and its already-reported high-rate SBS path as the refresh starting point.
+The earlier MCU cycles-per-pixel argument addressed a different architecture. Host patterns are diagnostics, not replacement outcomes. Keep the [GlassVR high-refresh correction](DECISION-GLASSVR-REFRESH-20261101.md) in force: use the author's existing original-Pro configuration as the refresh starting point. Neither 95 Hz nor the owner's approximate recollection is a ceiling, and a successful SDR mode does not prove HDR at the same rate.
 
-## Current priorities
+## Current ordered work
 
-| Workstream | Next substantive output |
+| Gate | Required output |
 |---|---|
-| Original-Pro native display controls | Exact-artifact preset/init handler map, target bus and register semantics; distinguish gain/temperature-only changes from native transfer capabilities. |
-| Exact-panel capability | Fitted suffix, programming evidence, native PQ/transfer operating conditions and internal precision. Do not substitute another Sony panel's specifications. |
-| Diagnostic access | Existing verified access first; otherwise a minimal Pro-specific firmware design with complete status/response validation and qualified recovery. |
-| Receiver/native-mode coordination | Correlate genuine HDR input, Pro-specific bridge status and a real native display mode. A status name is not an enable bit. |
-| Firmware deployment | Guarded local builder retaining the vendor core; separate component-aware updater and target-specific recovery. The prior Pro/XREAL container hypothesis remains untested. |
-| Full-SBS refresh | Reuse and refine GlassVR's CRU/SBS/connection/firmware route, qualifying distinct frames in both eyes. Neither 95 Hz nor the owner's recollection is a ceiling. |
-| IMU resource use | Measure the provider-lifetime/shared-resource question independently; no contention result has been established. |
+| Exact-Pro controls | Hash-identified stock preset/init functions, target buses and register/table semantics. Pro 2/Luma/XREAL findings help locate them, not assume their capabilities. |
+| Essential native-HDR capability | A native PQ mode or sufficient existing transfer/colour hardware, with correct precision and ordering. Limited gain, offset or fixed SDR gamma alone is insufficient. |
+| Deployment | Pro-specific image/component validation, authentication/update behaviour and reachable recovery. Offline builder and hardware updater remain separate. |
+| Bounded native-HDR test | Known genuine HDR input and through-eyepiece response from both eyes, localized to the glasses. A badge, ACK, EDID or boot success is insufficient. |
+| Practical qualification | Colour/headroom, declared clipping or roll-off, stability, reconnect/warm behaviour and GlassVR HDR-source compatibility. Qualify refresh and IMU changes independently. |
+
+A native panel PQ mode could avoid a separate HDR chip; AI enhancement, dynamic scene analysis and HDR10+ are not prerequisites for a bounded native-HDR experiment. Conversely, a software port of Pixelworks controls without matching silicon cannot supply its hardware functions. Adding a processor would be a different hardware project, not the default firmware-only goal.
 
 ## Evidence and previous decisions
 
-The [current investigation](NATIVE-HDR-INVESTIGATION-20261101.md) links the immutable research snapshot and gives ordered source/implementation work. Its control-path priority extends [firmware feasibility](FIRMWARE-FEASIBILITY-20261101.md), subject to the native-HDR requirement. The [device-first decision](DECISION-DEVICE-FIRST-20261101.md) and [GlassVR refresh correction](DECISION-GLASSVR-REFRESH-20261101.md) remain in force.
+[Current hardware decision](HDR-HARDWARE-FEASIBILITY-20261101.md) extends [native-HDR investigation](NATIVE-HDR-INVESTIGATION-20261101.md), [firmware feasibility](FIRMWARE-FEASIBILITY-20261101.md) and [device-first decision](DECISION-DEVICE-FIRST-20261101.md). Original-Pro stock presets and Pro 2 panel-register tuning remain the strongest exact/family access leads. The XREAL diagnostic-validation corrections remain applicable. The Pro/XREAL container relationship is still an untested hypothesis.
 
-The [original consolidated decision](DECISION-20261101.md) and [initial handoff](HANDOFF.md) retain historical tools and validation requirements, but their host-first priorities are superseded. The [preceding project index](https://github.com/Kyuugit/viture-pro-xr/blob/25fd89628f397785123075a580bb0d77c486454f/README.md) preserves the previous navigation. Earlier evidence and corrections were not silently rewritten.
+The [original decision](DECISION-20261101.md) and [original handoff](HANDOFF.md) retain historical tools and requirements, not a current host-first priority. The [preceding complete index](https://github.com/Kyuugit/viture-pro-xr/blob/4871a2a402bb53165b2c16b799948c5e7c8cf4d2/README.md) preserves earlier navigation. Supporting technical reports and evidence history remain in bin rather than being duplicated here.
 
 ## Completion boundary
 
-This is source research, not a shipped firmware or native-HDR demonstration. The new pass inspected manufacturer documents, pinned implementations and PDF diagrams and performed same-author critique. No fresh original-Pro firmware acquisition, binary disassembly, checksum validation, patch build, upload, register capture, optical result, IMU benchmark or refresh qualification occurred. Historical hashes, calculations and other authors' tests retain their original scope.
+This is a researched conditional implementation direction, not a shipped native-HDR firmware. The latest pass completed source/document comparison and same-author review; it did not build/flash a Pro image, read live registers, validate the container hypothesis or perform optical, IMU or refresh measurements. Failed original-Pro artifact retrieval and schematic screenshot attempts are explicitly recorded, not treated as device limitations.
 
-The exact original-Pro component/control map and panel programming evidence are the decisive missing inputs. Firmware acceptance, control reachability and native HDR capability remain separate gates. Any future result must identify model/build, requested versus actual signal, device state, optical uncertainty and negative/inconclusive outcomes. Evidence remains in bin; future implementation and results belong here. No hardware action, installation, purchase or outreach is authorized merely by a source finding.
+The next decisive result is an exact-Pro native hardware capability or an identified missing essential function. Source research does not authorize installation, device writes, flashing, purchases or outreach. Keep proprietary payloads and private device data out of public releases; distinguish proposed, built, accepted and measured results.
