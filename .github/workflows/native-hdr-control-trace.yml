@@ -13,31 +13,21 @@ jobs:
       - name: Install pinned disassembler in disposable runner
         run: |
           python3 -m pip install --disable-pip-version-check --only-binary=:all: capstone==5.0.6
-      - name: Inspect data-initializer structure without executing firmware
+      - name: Decode data-loader logic, not execute it
         shell: bash
         run: |
           python3 - <<'PY'
           import hashlib,struct,urllib.request
           from capstone import Cs,CS_ARCH_ARM,CS_MODE_THUMB,CS_MODE_MCLASS
-          from capstone.arm import ARM_OP_MEM,ARM_REG_PC
           with urllib.request.urlopen('https://static.viture.com/dfu-util/bin/n6p_latest.bin',timeout=35) as r:data=r.read(2000001)
           assert hashlib.sha256(data).hexdigest()=='5f3965f20e2e468efb70c6e268f2b7b2743bce47e6ecfa999faadf2637c96228'
           bias=0x0800efe8
-          md=Cs(CS_ARCH_ARM,CS_MODE_THUMB|CS_MODE_MCLASS);md.detail=True
-          for name,va,count in [('data_initializer',0x08010694,48)]:
-              print('REGION',name,hex(va))
-              off=va-bias
-              for i in md.disasm(data[off:off+count*4],va,count):
-                  s=hex(i.address-bias)+' '+hex(i.address)+' '+i.mnemonic+' '+i.op_str
-                  for o in i.operands:
-                      if o.type==ARM_OP_MEM and o.mem.base==ARM_REG_PC:
-                          p=((i.address+4)&~3)+o.mem.disp-bias
-                          if 0<=p<len(data)-3:s+=' ; literal@'+hex(p)+'='+hex(struct.unpack_from('<I',data,p)[0])
-                  print(s)
-          # Four-word startup records, constrained by their destination and size fields.
-          for off in range(24,len(data)-15,4):
-              src,dst,size,fn=struct.unpack_from('<4I',data,off)
-              if dst==0x20000000 and 0<size<0x20000 and 0x0800f000<fn<0x08025000:
-                  print('STARTUP_RECORD',hex(off),*[hex(x) for x in (src,dst,size,fn)])
-          print('Only startup mapping metadata and bounded disassembly; no device access or firmware execution.')
+          md=Cs(CS_ARCH_ARM,CS_MODE_THUMB|CS_MODE_MCLASS)
+          for off in (0x24bd4,0x24be4):print('SCATTER_RECORD',hex(off),*[hex(x) for x in struct.unpack_from('<4I',data,off)])
+          print('DECOMPRESSOR_DECODE_BEGIN')
+          va=0x08010780;off=va-bias
+          for i in md.disasm(data[off:off+320],va,95):
+              print(hex(i.address-bias),hex(i.address),i.mnemonic,i.op_str)
+          print('DECOMPRESSOR_DECODE_END')
+          print('No firmware execution, extraction publication, mutation or device access.')
           PY
