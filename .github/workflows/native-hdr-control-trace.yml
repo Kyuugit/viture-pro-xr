@@ -31,14 +31,14 @@ jobs:
                       p=((i.address+4)&~3)+o.mem.disp-bias
                       if 0<=p<len(data)-3: out+=' ; literal '+hex(struct.unpack_from('<I',data,p)[0])
               return out
-          functions=[('color_state_getter',0x801f620),('color_transition_A',0x801fa80),('color_transition_B',0x801f608),('other_transition_C',0x801f7a0),('other_transition_D',0x801f8d0),('state_transition_E',0x801f7dc),('state_transition_F',0x801f76c),('panel_init_call_1',0x8021e04),('panel_init_call_2',0x8021cdc),('panel_init_call_3',0x8021dcc)]
+          functions=[('preset_consumer_A',0x80220e8),('preset_consumer_B',0x8021f10),('brightness_apply_candidate',0x801f8f4),('left_panel_byte_writer',0x801736c),('right_panel_byte_writer',0x8017494),('preset_related_parameter',0x8022128)]
           for name,start in functions:
               todo=[start];seen={};calls=set();escapes=[]
-              while todo and len(seen)<150:
+              while todo and len(seen)<160:
                   va=todo.pop()
-                  while va not in seen and len(seen)<150:
+                  while va not in seen and len(seen)<160:
                       off=va-bias
-                      if not (start<=va<start+0x700 and 24<=off<0x15e00):
+                      if not (start<=va<start+0x900 and 24<=off<0x15e00):
                           escapes.append(hex(va));break
                       i=next(md.disasm(data[off:off+4],va,1),None)
                       if i is None:break
@@ -52,7 +52,7 @@ jobs:
                           todo+=targets
                           if i.mnemonic in ('b','b.w'):break
                       va+=i.size
-              print('FUNCTION_BEGIN',name,hex(start),'file',hex(start-bias),'instruction_count',len(seen),'budget_hit',len(seen)>=150)
+              print('FUNCTION_BEGIN',name,hex(start),'file',hex(start-bias),'instruction_count',len(seen),'budget_hit',len(seen)>=160)
               for va in sorted(seen):print(annotate(seen[va]))
               print('CALLEES',json.dumps([hex(x) for x in sorted(calls)]),'ESCAPES',json.dumps(sorted(set(escapes))))
               print('FUNCTION_END')
